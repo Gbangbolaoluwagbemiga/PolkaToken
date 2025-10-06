@@ -12,6 +12,24 @@ mod tests {
         (alice, bob)
     }
 
+    // Helper function to decode Transfer event data
+    fn decode_transfer_event(event_data: &[u8]) -> (Option<Address>, Option<Address>, U256) {
+        let mut data = event_data;
+        let from: Option<Address> = Decode::decode(&mut data).unwrap();
+        let to: Option<Address> = Decode::decode(&mut data).unwrap();
+        let value: U256 = Decode::decode(&mut data).unwrap();
+        (from, to, value)
+    }
+
+    // Helper function to decode Approval event data
+    fn decode_approval_event(event_data: &[u8]) -> (Address, Address, U256) {
+        let mut data = event_data;
+        let owner: Address = Decode::decode(&mut data).unwrap();
+        let spender: Address = Decode::decode(&mut data).unwrap();
+        let value: U256 = Decode::decode(&mut data).unwrap();
+        (owner, spender, value)
+    }
+
     #[ink::test]
     fn new_works() {
         let (alice, _) = setup();
@@ -23,7 +41,9 @@ mod tests {
         let events = test::recorded_events();
         assert_eq!(events.len(), 1);
         let event = &events[0];
-        let value: U256 = Decode::decode(&mut &event.data[..]).unwrap();
+        let (from, to, value) = decode_transfer_event(&event.data);
+        assert_eq!(from, None);
+        assert_eq!(to, Some(alice));
         assert_eq!(value, initial_supply);
     }
 
@@ -41,7 +61,9 @@ mod tests {
         let events = test::recorded_events();
         assert_eq!(events.len(), initial_events_len + 1);
         let event = &events[events.len() - 1];
-        let value: U256 = Decode::decode(&mut &event.data[..]).unwrap();
+        let (from, to, value) = decode_transfer_event(&event.data);
+        assert_eq!(from, Some(alice));
+        assert_eq!(to, Some(bob));
         assert_eq!(value, transfer_amount);
 
         assert_eq!(contract.balance_of(alice), initial_supply - transfer_amount);
@@ -80,7 +102,9 @@ mod tests {
         let events = test::recorded_events();
         assert_eq!(events.len(), initial_events_len + 1);
         let event = &events[events.len() - 1];
-        let value: U256 = Decode::decode(&mut &event.data[..]).unwrap();
+        let (owner, spender, value) = decode_approval_event(&event.data);
+        assert_eq!(owner, alice);
+        assert_eq!(spender, bob);
         assert_eq!(value, approve_amount);
 
         assert_eq!(contract.allowance(alice, bob), approve_amount);
@@ -104,7 +128,9 @@ mod tests {
         let events = test::recorded_events();
         assert_eq!(events.len(), initial_events_len + 1);
         let event = &events[events.len() - 1];
-        let value: U256 = Decode::decode(&mut &event.data[..]).unwrap();
+        let (from, to, value) = decode_transfer_event(&event.data);
+        assert_eq!(from, Some(alice));
+        assert_eq!(to, Some(bob));
         assert_eq!(value, transfer_amount);
 
         assert_eq!(contract.balance_of(alice), initial_supply - transfer_amount);
@@ -165,7 +191,7 @@ mod tests {
 
     #[ink::test]
     fn balance_returns_zero_by_default() {
-        let (alice, bob) = setup();
+        let (_alice, bob) = setup();
         let contract = Erc20::new(U256::from(1000u32));
         assert_eq!(contract.balance_of(bob), U256::zero());
     }
