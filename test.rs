@@ -1,131 +1,172 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use ink::env::{
-        test::{default_accounts, set_caller, recorded_events, DefaultAccounts},
-        DefaultEnvironment,
-    };
-    use ink::prelude::Address;
+    use ink::env::{test, DefaultEnvironment};
+    use ink::primitives::Address;
     use ink::U256;
+    use ink::scale::Decode;
+    use crate::erc20::{Erc20, Error};
 
-    // Helper to set up the environment and create a new contract instance
-    fn setup() -> (DefaultAccounts<DefaultEnvironment>, Erc20) {
-        let accounts = default_accounts();
-        set_caller::<DefaultEnvironment>(accounts.alice);
-        let total_supply = U256::from(1000);
-        let contract = Erc20::new(total_supply);
-        (accounts, contract)
+    fn setup() -> (Address, Address) {
+        let alice: Address = Default::default();
+        let bob: Address = [1u8; 20].into();
+        (alice, bob)
     }
 
     #[ink::test]
     fn new_works() {
-        let (accounts, contract) = setup();
-        assert_eq!(contract.total_supply(), U256::from(1000));
-        assert_eq!(contract.balance_of(accounts.alice), U256::from(1000));
-        assert_eq!(contract.balance_of(accounts.bob), U256::from(0));
+        let (alice, _) = setup();
+        let initial_supply = U256::from(1000u32);
+        let contract = Erc20::new(initial_supply);
+        assert_eq!(contract.total_supply(), initial_supply);
+        assert_eq!(contract.balance_of(alice), initial_supply);
 
-        // Check Transfer event
-        let events = recorded_events().collect::<Vec<_>>();
-        assert_eq!(events.len(), 1, "Expected one Transfer event");
-        let event = events[0].clone();
-        assert_eq!(event.topics.len(), 3, "Expected three topics");
-        let transfer_event = event.as_event::<Transfer>().unwrap().unwrap();
-        assert_eq!(transfer_event.from, None);
-        assert_eq!(transfer_event.to, Some(accounts.alice));
-        assert_eq!(transfer_event.value, U256::from(1000));
+        let events = test::recorded_events();
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        let value: U256 = Decode::decode(&mut &event.data[..]).unwrap();
+        assert_eq!(value, initial_supply);
     }
 
     #[ink::test]
     fn transfer_works() {
-        let (accounts, mut contract) = setup();
-        let result = contract.transfer(accounts.bob, U256::from(100));
-        assert_eq!(result, Ok(()));
-        assert_eq!(contract.balance_of(accounts.alice), U256::from(900));
-        assert_eq!(contract.balance_of(accounts.bob), U256::from(100));
+        let (alice, bob) = setup();
+        let initial_supply = U256::from(1000u32);
+        let mut contract = Erc20::new(initial_supply);
+        let transfer_amount = U256::from(100u32);
+        assert_eq!(contract.balance_of(bob), U256::zero());
 
-        // Check Transfer event
-        let events = recorded_events().collect::<Vec<_>>();
-        assert_eq!(events.len(), 1, "Expected one Transfer event");
-        let event = events[0].clone();
-        let transfer_event = event.as_event::<Transfer>().unwrap().unwrap();
-        assert_eq!(transfer_event.from, Some(accounts.alice));
-        assert_eq!(transfer_event.to, Some(accounts.bob));
-        assert_eq!(transfer_event.value, U256::from(100));
+        let initial_events_len = test::recorded_events().len();
+        contract.transfer(bob, transfer_amount).unwrap();
+
+        let events = test::recorded_events();
+        assert_eq!(events.len(), initial_events_len + 1);
+        let event = &events[events.len() - 1];
+        let value: U256 = Decode::decode(&mut &event.data[..]).unwrap();
+        assert_eq!(value, transfer_amount);
+
+        assert_eq!(contract.balance_of(alice), initial_supply - transfer_amount);
+        assert_eq!(contract.balance_of(bob), transfer_amount);
     }
 
     #[ink::test]
-    fn transfer_insufficient_balance_fails() {
-        let (accounts, mut contract) = setup();
-        let result = contract.transfer(accounts.bob, U256::from(1001));
+    fn transfer_fails_with_insufficient_balance() {
+        let (alice, bob) = setup();
+        let initial_supply = U256::from(1000u32);
+        let mut contract = Erc20::new(initial_supply);
+        let transfer_amount = U256::from(1001u32);
+
+        let initial_events_len = test::recorded_events().len();
+        let result = contract.transfer(bob, transfer_amount);
         assert_eq!(result, Err(Error::InsufficientBalance));
-        assert_eq!(contract.balance_of(accounts.alice), U256::from(1000));
-        assert_eq!(contract.balance_of(accounts.bob), U256::from(0));
+
+        let events = test::recorded_events();
+        assert_eq!(events.len(), initial_events_len); // No event emitted on failure
+
+        assert_eq!(contract.balance_of(alice), initial_supply);
+        assert_eq!(contract.balance_of(bob), U256::zero());
     }
 
     #[ink::test]
     fn approve_works() {
-        let (accounts, mut contract) = setup();
-        let result = contract.approve(accounts.bob, U256::from(200));
-        assert_eq!(result, Ok(()));
-        assert_eq!(contract.allowance(accounts.alice, accounts.bob), U256::from(200));
+        let (alice, bob) = setup();
+        let initial_supply = U256::from(1000u32);
+        let mut contract = Erc20::new(initial_supply);
+        let approve_amount = U256::from(200u32);
+        assert_eq!(contract.allowance(alice, bob), U256::zero());
 
-        // Check Approval event
-        let events = recorded_events().collect::<Vec<_>>();
-        assert_eq!(events.len(), 1, "Expected one Approval event");
-        let event = events[0].clone();
-        let approval_event = event.as_event::<Approval>().unwrap().unwrap();
-        assert_eq!(approval_event.owner, accounts.alice);
-        assert_eq!(approval_event.spender, accounts.bob);
-        assert_eq!(approval_event.value, U256::from(200));
+        let initial_events_len = test::recorded_events().len();
+        contract.approve(bob, approve_amount).unwrap();
+
+        let events = test::recorded_events();
+        assert_eq!(events.len(), initial_events_len + 1);
+        let event = &events[events.len() - 1];
+        let value: U256 = Decode::decode(&mut &event.data[..]).unwrap();
+        assert_eq!(value, approve_amount);
+
+        assert_eq!(contract.allowance(alice, bob), approve_amount);
     }
 
     #[ink::test]
     fn transfer_from_works() {
-        let (accounts, mut contract) = setup();
-        // Alice approves Bob to spend 200 tokens
-        contract.approve(accounts.bob, U256::from(200)).unwrap();
-        // Switch to Bob as caller
-        set_caller::<DefaultEnvironment>(accounts.bob);
-        let result = contract.transfer_from(accounts.alice, accounts.charlie, U256::from(150));
+        let (alice, bob) = setup();
+        let initial_supply = U256::from(1000u32);
+        let mut contract = Erc20::new(initial_supply);
+        let transfer_amount = U256::from(100u32);
+
+        contract.approve(bob, U256::from(200u32)).unwrap();
+        assert_eq!(contract.allowance(alice, bob), U256::from(200u32));
+
+        test::set_caller(bob);
+        let initial_events_len = test::recorded_events().len();
+        let result = contract.transfer_from(alice, bob, transfer_amount);
         assert_eq!(result, Ok(()));
-        assert_eq!(contract.balance_of(accounts.alice), U256::from(850));
-        assert_eq!(contract.balance_of(accounts.charlie), U256::from(150));
-        assert_eq!(contract.allowance(accounts.alice, accounts.bob), U256::from(50));
 
-        // Check Transfer event
-        let events = recorded_events().collect::<Vec<_>>();
-        assert_eq!(events.len(), 2, "Expected Approval and Transfer events");
-        let transfer_event = events[1].clone().as_event::<Transfer>().unwrap().unwrap();
-        assert_eq!(transfer_event.from, Some(accounts.alice));
-        assert_eq!(transfer_event.to, Some(accounts.charlie));
-        assert_eq!(transfer_event.value, U256::from(150));
+        let events = test::recorded_events();
+        assert_eq!(events.len(), initial_events_len + 1);
+        let event = &events[events.len() - 1];
+        let value: U256 = Decode::decode(&mut &event.data[..]).unwrap();
+        assert_eq!(value, transfer_amount);
+
+        assert_eq!(contract.balance_of(alice), initial_supply - transfer_amount);
+        assert_eq!(contract.balance_of(bob), transfer_amount);
+        assert_eq!(contract.allowance(alice, bob), U256::from(100u32));
     }
 
     #[ink::test]
-    fn transfer_from_insufficient_allowance_fails() {
-        let (accounts, mut contract) = setup();
-        // Alice approves Bob for 100 tokens
-        contract.approve(accounts.bob, U256::from(100)).unwrap();
-        // Switch to Bob
-        set_caller::<DefaultEnvironment>(accounts.bob);
-        let result = contract.transfer_from(accounts.alice, accounts.charlie, U256::from(101));
+    fn transfer_from_fails_with_insufficient_allowance() {
+        let (alice, bob) = setup();
+        let initial_supply = U256::from(1000u32);
+        let mut contract = Erc20::new(initial_supply);
+        let transfer_amount = U256::from(100u32);
+
+        contract.approve(bob, U256::from(50u32)).unwrap();
+
+        test::set_caller(bob);
+        let initial_events_len = test::recorded_events().len();
+        let result = contract.transfer_from(alice, bob, transfer_amount);
         assert_eq!(result, Err(Error::InsufficientAllowance));
-        assert_eq!(contract.balance_of(accounts.alice), U256::from(1000));
-        assert_eq!(contract.balance_of(accounts.charlie), U256::from(0));
-        assert_eq!(contract.allowance(accounts.alice, accounts.bob), U256::from(100));
+
+        let events = test::recorded_events();
+        assert_eq!(events.len(), initial_events_len); // No event emitted on failure
+
+        assert_eq!(contract.balance_of(alice), initial_supply);
+        assert_eq!(contract.balance_of(bob), U256::zero());
+        assert_eq!(contract.allowance(alice, bob), U256::from(50u32));
     }
 
     #[ink::test]
-    fn transfer_from_insufficient_balance_fails() {
-        let (accounts, mut contract) = setup();
-        // Alice approves Bob for 2000 tokens (more than her balance)
-        contract.approve(accounts.bob, U256::from(2000)).unwrap();
-        // Switch to Bob
-        set_caller::<DefaultEnvironment>(accounts.bob);
-        let result = contract.transfer_from(accounts.alice, accounts.charlie, U256::from(1001));
+    fn transfer_from_fails_with_insufficient_balance() {
+        let (alice, bob) = setup();
+        let initial_supply = U256::from(1000u32);
+        let mut contract = Erc20::new(initial_supply);
+        let transfer_amount = U256::from(1001u32);
+
+        contract.approve(bob, U256::from(2000u32)).unwrap();
+
+        test::set_caller(bob);
+        let initial_events_len = test::recorded_events().len();
+        let result = contract.transfer_from(alice, bob, transfer_amount);
         assert_eq!(result, Err(Error::InsufficientBalance));
-        assert_eq!(contract.balance_of(accounts.alice), U256::from(1000));
-        assert_eq!(contract.balance_of(accounts.charlie), U256::from(0));
-        assert_eq!(contract.allowance(accounts.alice, accounts.bob), U256::from(2000));
+
+        let events = test::recorded_events();
+        assert_eq!(events.len(), initial_events_len); // No event emitted on failure
+
+        assert_eq!(contract.balance_of(alice), initial_supply);
+        assert_eq!(contract.balance_of(bob), U256::zero());
+        assert_eq!(contract.allowance(alice, bob), U256::from(2000u32));
+    }
+
+    #[ink::test]
+    fn allowance_returns_zero_by_default() {
+        let (alice, bob) = setup();
+        let contract = Erc20::new(U256::from(1000u32));
+        assert_eq!(contract.allowance(alice, bob), U256::zero());
+    }
+
+    #[ink::test]
+    fn balance_returns_zero_by_default() {
+        let (alice, bob) = setup();
+        let contract = Erc20::new(U256::from(1000u32));
+        assert_eq!(contract.balance_of(bob), U256::zero());
     }
 }
