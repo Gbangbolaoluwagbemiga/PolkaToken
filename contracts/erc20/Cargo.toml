@@ -1,0 +1,25 @@
+[package]
+name = "erc20"
+version = "0.1.0"
+authors = ["[your_name] <[your_email]>"]
+edition = "2021"
+
+[dependencies]
+ink = { git = "https://github.com/use-ink/ink", tag = "v6.0.0-alpha.4", default-features = false }
+scale = { package = "parity-scale-codec", version = "3", default-features = false, features = ["derive"] }
+scale-info = { version = "2", default-features = false, features = ["derive"] }
+
+[lib]
+path = "lib.rs"
+
+[features]
+default = ["std"]
+std = [
+    "ink/std",
+]
+ink-as-dependency = []
+
+[package.metadata.ink-lang]
+abi = "ink"
+
+
